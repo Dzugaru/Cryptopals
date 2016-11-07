@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -16,9 +17,7 @@ namespace Cryptopals
             8.167, 1.492, 2.782, 4.253, 12.702, 2.228, 2.015, 6.094, 6.966, 0.153, 0.772, 4.025, 2.406,
             6.749, 7.507, 1.929, 0.095, 5.987, 6.327, 9.056, 2.758, 0.978, 2.360, 0.150, 1.974, 0.074, 23.4
         };
-
-        static readonly string EnglishCharRankStr = "etaoinshrdlcumwfgypbvkjxqz";
-        static readonly int[] EnglishCharRank;
+      
 
         static Program()
         {
@@ -33,11 +32,7 @@ namespace Cryptopals
             Base64[62] = '+';
             Base64[63] = '/';
 
-            NormalizeFreq(EnglishCharFreq);
-
-            EnglishCharRank = new int[26];
-            for (int i = 0; i < 26; i++)
-                EnglishCharRank[i] = EnglishCharRankStr[i] - 'a';            
+            NormalizeFreq(EnglishCharFreq);   
         }
 
         static string HexToBase64(string hex)
@@ -128,26 +123,6 @@ namespace Cryptopals
                 freq[i] /= freqSum;
         }
 
-        static double GetPlainEnglishAmount(byte[] str)
-        {
-            int n = 0;
-            for (int i = 0; i < str.Length; i++)
-            {
-                byte b = str[i];
-                int idx;
-                if (b == ' ') idx = 26;
-                else idx = b - 'a';
-
-                if (idx < 0 || idx > 26)
-                    idx = b - 'A';
-                if (idx < 0 || idx > 26)
-                    continue;
-                n++;
-            }
-
-            return n / (double)str.Length;
-        }
-
         static double[] GetStringCharFreq(byte[] str)
         {
             double[] freq = new double[27];
@@ -168,73 +143,25 @@ namespace Cryptopals
 
             NormalizeFreq(freq);
             return freq;
-        }
-
-        static int[] GetStringCharsRankedByFreq(byte[] str)
-        {
-            int[] freq = new int[26];
-            for (int i = 0; i < str.Length; i++)
-            {
-                byte b = str[i];
-                int idx;
-                if (b == ' ') idx = 26;
-                else idx = b - 'a';
-
-                if (idx < 0 || idx > 26)
-                    idx = b - 'A';
-                if (idx < 0 || idx > 26)
-                    continue;
-                freq[idx]++;
-            }
-
-            return freq.Select((f, i) => (freq: f, idx: i)).Where(x => x.freq > 0).OrderByDescending(x => x.freq).Select(x => x.idx).ToArray();            
-        }
-       
-        static double RankDistance(int[] ethalon, int[] proposal)
-        {
-            List<int> eth = ethalon.Where(x => proposal.Contains(x)).ToList();
-
-            int n = proposal.Length;
-            int k = 0, e = 0;
-            for (int i = 0; i < n; i++)            
-                for (int j = 0; j < i; j++)
-                {
-                    k++;
-                    if (eth.IndexOf(proposal[i]) < eth.IndexOf(proposal[j])) e++;
-                }
-
-            return e / (double)k;
-        }
+        }       
+     
 
         static double GetFreqDifference(double[] eth, double[] prop)
         {
-            //double error = 0;
-            //for (int i = 0; i < prop.Length; i++)
-            //    for (int j = 0; j < i; j++)
-            //    {
-            //        if (prop[i] == 0 || prop[j] == 0) continue;                  
-            //        error += Math.Pow((prop[i] / prop[j] - eth[i] / eth[j]), 2);
-            //    }
-
-            //return error;
-
             double err = 0;
-            for (int i = 0; i < prop.Length; i++)
-            {
-                err += Math.Pow(eth[i] - prop[i], 2);
-            }
+            for (int i = 0; i < prop.Length; i++)            
+                err += Math.Pow(eth[i] - prop[i], 2);            
             return err;
         }
 
-        static byte[] DecypherSingleByteXorBySqrDist(byte[] msg)
+        static byte[] DecypherSingleByteXor(byte[] msg, out double best_diff)
         {
             double min_freq_diff = double.MaxValue;
             byte best_x = 0;
 
             for (byte x = 0; x < 255; x++)
             {
-                byte[] dec_msg = XorSingleByte(msg, x);
-                if (GetPlainEnglishAmount(dec_msg) < 0.75) continue;
+                byte[] dec_msg = XorSingleByte(msg, x);               
 
                 double[] freq = GetStringCharFreq(dec_msg);
                 double freq_diff = GetFreqDifference(EnglishCharFreq, freq);
@@ -242,36 +169,29 @@ namespace Cryptopals
                 {
                     min_freq_diff = freq_diff;
                     best_x = x;                    
-                }
-
-                Console.WriteLine(x + " " + freq_diff + " " + System.Text.Encoding.ASCII.GetString(dec_msg));
+                }               
             }
 
+            best_diff = min_freq_diff;
             return XorSingleByte(msg, best_x);
         }
 
-        static byte[] DecypherSingleByteXor(byte[] msg)
+        static string FindLineCodedBySingleByteXor(string filename)
         {
-            double min_diff = double.MaxValue;
-            byte best_x = 0;
+            string[] lines = File.ReadAllLines(filename);
 
-            for (byte x = 0; x < 255; x++)
+            List<(string, double)> list = new List<(string, double)>();
+            
+            foreach(string line in lines)
             {
-                byte[] dec_msg = XorSingleByte(msg, x);
-                if (GetPlainEnglishAmount(dec_msg) < 0.5) continue;
-
-                int[] rank = GetStringCharsRankedByFreq(dec_msg);
-                double diff = RankDistance(EnglishCharRank, rank);
-                if (diff < min_diff)
-                {
-                    min_diff = diff;
-                    best_x = x;
-                }
-
-                Console.WriteLine(System.Text.Encoding.ASCII.GetString(dec_msg));
+                double diff;
+                string dec = System.Text.Encoding.ASCII.GetString(DecypherSingleByteXor(DecodeHex(line), out diff));
+                list.Add((dec, diff));
             }
 
-            return XorSingleByte(msg, best_x);
+            var slist = list.OrderBy(x => x.Item2).ToList();
+
+            return slist[0].Item1;
         }
 
         static void Main(string[] args)
@@ -280,8 +200,11 @@ namespace Cryptopals
             TestXor();
 
             //double diff = GetFreqDifference(EnglishCharFreq, GetStringCharFreq(System.Text.Encoding.ASCII.GetBytes("Cooking MCs like a pound of bacon".ToUpper())));
-            string dec = System.Text.Encoding.ASCII.GetString(DecypherSingleByteXorBySqrDist(DecodeHex("1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736")));
+            //double diff;
+            //string dec = System.Text.Encoding.ASCII.GetString(DecypherSingleByteXor(DecodeHex("1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736"), out diff));
             //double d = RankDistance(new[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 }, new[] {1, 2, 3, 5, 4 });
+
+            string s = FindLineCodedBySingleByteXor("4.txt");
 
             Console.WriteLine("Tests success!");
             Console.ReadLine();
