@@ -18,7 +18,7 @@ namespace Cryptopals
             8.167, 1.492, 2.782, 4.253, 12.702, 2.228, 2.015, 6.094, 6.966, 0.153, 0.772, 4.025, 2.406,
             6.749, 7.507, 1.929, 0.095, 5.987, 6.327, 9.056, 2.758, 0.978, 2.360, 0.150, 1.974, 0.074, 23.4
         };
-      
+
 
         static Program()
         {
@@ -33,17 +33,17 @@ namespace Cryptopals
             Base64[62] = '+';
             Base64[63] = '/';
 
-            NormalizeFreq(EnglishCharFreq);         
+            NormalizeFreq(EnglishCharFreq);
         }
 
         //TODO: y I did this??
         static string HexToBase64(string hex)
         {
             StringBuilder sb = new StringBuilder();
-                        
+
             int left_val = 0, left_bits = 0;
-            
-            for (int i = 0; i < hex.Length; i+=2)
+
+            for (int i = 0; i < hex.Length; i += 2)
             {
                 int b = int.Parse(hex.Substring(i, 2), System.Globalization.NumberStyles.AllowHexSpecifier);
                 int r = b & ((1 << (2 + left_bits)) - 1);
@@ -51,15 +51,15 @@ namespace Cryptopals
                 sb.Append(Base64[(left_val << (6 - left_bits)) + ((b - r) >> (2 + left_bits))]);
                 left_val = r;
                 left_bits += 2;
-                
-                if(left_bits == 6)
-                {                    
+
+                if (left_bits == 6)
+                {
                     sb.Append(Base64[left_val]);
-                    left_bits = left_val = 0;                    
+                    left_bits = left_val = 0;
                 }
             }
 
-            if(left_bits > 0)
+            if (left_bits > 0)
                 sb.Append(Base64[(left_val << (6 - left_bits))]);
 
             int pad = hex.Length % 3;
@@ -101,15 +101,15 @@ namespace Cryptopals
             StringBuilder sb = new StringBuilder();
             for (int i = 0; i < bytes.Length; i++)
                 sb.Append(bytes[i].ToString("x2"));
-            return sb.ToString();            
+            return sb.ToString();
         }
 
         static byte[] DecodeHex(string str)
         {
             byte[] bytes = new byte[str.Length / 2];
-            for (int i = 0; i < str.Length; i+=2)            
+            for (int i = 0; i < str.Length; i += 2)
                 bytes[i / 2] = byte.Parse(str.Substring(i, 2), System.Globalization.NumberStyles.AllowHexSpecifier);
-            return bytes;            
+            return bytes;
         }
 
         static byte[] Xor(byte[] a, byte[] b)
@@ -121,7 +121,7 @@ namespace Cryptopals
             for (int i = 0; i < a.Length; i++)
                 c[i] = (byte)(a[i] ^ b[i]);
 
-            return c;            
+            return c;
         }
 
         static byte[] XorSingleByte(byte[] a, byte x)
@@ -135,16 +135,16 @@ namespace Cryptopals
         static byte[] XorRepeated(byte[] msg, byte[] key)
         {
             byte[] coded = new byte[msg.Length];
-            for (int i = 0; i < msg.Length; i++)            
+            for (int i = 0; i < msg.Length; i++)
                 coded[i] = (byte)(msg[i] ^ key[i % key.Length]);
-            return coded;            
+            return coded;
         }
 
         static void TestXor()
         {
             System.Diagnostics.Debug.Assert(
                 EncodeHex(Xor(
-                    DecodeHex("1c0111001f010100061a024b53535009181c"), 
+                    DecodeHex("1c0111001f010100061a024b53535009181c"),
                     DecodeHex("686974207468652062756c6c277320657965"))) ==
                 "746865206b696420646f6e277420706c6179");
         }
@@ -159,7 +159,7 @@ namespace Cryptopals
         }
 
         static void NormalizeFreq(double[] freq)
-        {           
+        {
             double freqSum = 0;
             for (int i = 0; i < freq.Length; i++)
                 freqSum += freq[i];
@@ -170,7 +170,7 @@ namespace Cryptopals
         static double[] GetStringCharFreq(byte[] str)
         {
             double[] freq = new double[27];
-            for(int i = 0; i < str.Length; i++)
+            for (int i = 0; i < str.Length; i++)
             {
                 byte b = str[i];
                 int idx;
@@ -187,19 +187,19 @@ namespace Cryptopals
 
             NormalizeFreq(freq);
             return freq;
-        }       
-     
+        }
+
 
         static double GetFreqDifference(double[] eth, double[] prop)
         {
             double err = 0;
-            for (int i = 0; i < prop.Length; i++)            
-                err += Math.Pow(eth[i] - prop[i], 2);            
+            for (int i = 0; i < prop.Length; i++)
+                err += Math.Pow(eth[i] - prop[i], 2);
             return err;
         }
 
         static int Hamming(byte[] a, byte[] b)
-        {            
+        {
             byte[] c = Xor(a, b);
             int dist = 0;
             for (int i = 0; i < c.Length; i++)
@@ -221,6 +221,44 @@ namespace Cryptopals
                                                     DecodeASCII("wokka wokka!!!")) == 37);
         }
 
+        static byte[] PadBlock(byte[] block, int target_len)
+        {
+            byte pad_byte = (byte)(target_len - block.Length);
+
+            byte[] result = new byte[target_len];
+            for (int i = 0; i < target_len; i++)
+            {
+                if (i < block.Length) result[i] = block[i];
+                else result[i] = pad_byte;
+            }
+            return result;
+        }
+
+        static List<byte[]> BreakIntoBlocksWithPadding(byte[] msg, int block_size)
+        {
+            List<byte[]> blocks = new List<byte[]>();
+
+            for (int i = 0; i < msg.Length; i += block_size)
+            {
+                byte[] b = new byte[Math.Min(block_size, msg.Length - i)];
+                Array.Copy(msg, i, b, 0, b.Length);
+                blocks.Add(b);
+            }
+
+            blocks[blocks.Count - 1] = PadBlock(blocks[blocks.Count - 1], block_size);
+
+            return blocks;
+        }
+
+        static byte[] GatherBlocks(List<byte[]> blocks, int block_size)
+        {
+            byte[] msg = new byte[blocks.Count * block_size];
+            for (int i = 0; i < blocks.Count; i++)
+                Array.Copy(blocks[i], 0, msg, i * block_size, block_size);
+
+            return msg;            
+        }
+
         static byte[] DecypherSingleByteXor(byte[] msg, out byte key, out double best_diff)
         {
             double min_freq_diff = double.MaxValue;
@@ -228,15 +266,15 @@ namespace Cryptopals
 
             for (byte x = 0; x < 255; x++)
             {
-                byte[] dec_msg = XorSingleByte(msg, x);               
+                byte[] dec_msg = XorSingleByte(msg, x);
 
                 double[] freq = GetStringCharFreq(dec_msg);
                 double freq_diff = GetFreqDifference(EnglishCharFreq, freq);
-                if(freq_diff < min_freq_diff)
+                if (freq_diff < min_freq_diff)
                 {
                     min_freq_diff = freq_diff;
-                    best_x = x;                    
-                }               
+                    best_x = x;
+                }
             }
 
             best_diff = min_freq_diff;
@@ -249,8 +287,8 @@ namespace Cryptopals
             string[] lines = File.ReadAllLines(filename);
 
             List<(string, double)> list = new List<(string, double)>();
-            
-            foreach(string line in lines)
+
+            foreach (string line in lines)
             {
                 double diff;
                 byte key;
@@ -285,7 +323,7 @@ namespace Cryptopals
 
             for (int key_size = min_key_size; key_size < max_key_size; key_size++)
             {
-                List<byte[]> blocks = new List<byte[]>();                
+                List<byte[]> blocks = new List<byte[]>();
                 for (int i = 0; i < NBlocksForHamming; i++)
                 {
                     byte[] b = new byte[key_size];
@@ -293,27 +331,27 @@ namespace Cryptopals
                     blocks.Add(b);
                 }
                 double dist = 0;
-                for (int i = 0; i < blocks.Count; i++)                
-                    for (int j = 0; j < i; j++)                    
+                for (int i = 0; i < blocks.Count; i++)
+                    for (int j = 0; j < i; j++)
                         dist += Hamming(blocks[i], blocks[j]);
 
                 dist /= (double)key_size;
-                
+
                 ks_dist.Add((dist, key_size));
             }
 
             var sort_ks_dist = ks_dist.OrderBy(x => x.dist).Take(NTopBest).ToList();
             List<(string key, string message)> results = new List<(string key, string message)>();
-            foreach(int key_size in sort_ks_dist.Select(x => x.key_size))
+            foreach (int key_size in sort_ks_dist.Select(x => x.key_size))
             {
                 List<byte>[] blocks = new List<byte>[key_size];
                 for (int i = 0; i < key_size; i++)
                     blocks[i] = new List<byte>();
-                
-                for (int i = 0; i < msg.Length; i+=key_size)
+
+                for (int i = 0; i < msg.Length; i += key_size)
                 {
                     for (int j = 0; j < key_size && j < msg.Length - i; j++)
-                        blocks[j].Add(msg[i + j]);                    
+                        blocks[j].Add(msg[i + j]);
                 }
 
                 byte[] full_key = new byte[key_size];
@@ -330,7 +368,7 @@ namespace Cryptopals
                 //Console.ReadLine();
             }
 
-            return results;       
+            return results;
         }
 
         static byte[] DecryptAES_ECB(byte[] msg, byte[] key)
@@ -338,11 +376,65 @@ namespace Cryptopals
             var aes = Aes.Create();
             aes.Mode = CipherMode.ECB;
             aes.BlockSize = 128;
+            aes.KeySize = 128;
+            aes.Padding = PaddingMode.None; //NOTE: crucial for correct one-block-at-a-time encoding/decoding?
             aes.Key = key;
 
             var decr = aes.CreateDecryptor();
-            return decr.TransformFinalBlock(msg, 0, msg.Length);
-        }        
+
+            List<byte[]> blocks = BreakIntoBlocksWithPadding(msg, 16);
+            List<byte[]> result_blocks = new List<byte[]>();
+            foreach(var b in blocks)
+            {
+                byte[] dec_b = new byte[16];
+                decr.TransformBlock(b, 0, 16, dec_b, 0);
+                result_blocks.Add(dec_b);
+            }
+            
+            return GatherBlocks(result_blocks, 16);
+        }
+
+        static byte[] EncryptAES_ECB(byte[] msg, byte[] key)
+        {
+            var aes = Aes.Create();
+            aes.Mode = CipherMode.ECB;
+            aes.BlockSize = 128;
+            aes.KeySize = 128;
+            aes.Padding = PaddingMode.None;
+            aes.Key = key;
+
+            var encr = aes.CreateEncryptor();
+            List<byte[]> blocks = BreakIntoBlocksWithPadding(msg, 16);
+            List<byte[]> result_blocks = new List<byte[]>();
+            foreach (var b in blocks)
+            {
+                byte[] enc_b = new byte[16];
+                encr.TransformBlock(b, 0, 16, enc_b, 0);
+                result_blocks.Add(enc_b);
+            }
+
+            return GatherBlocks(result_blocks, 16);
+        }
+
+        static byte[] DecryptAES_CBC(byte[] msg, byte[] key, byte[] iv)
+        {
+            int block_size = key.Length;
+
+            List<byte[]> blocks = BreakIntoBlocksWithPadding(msg, block_size);
+            byte[] result = new byte[blocks.Count * block_size];
+            byte[] v = iv;
+
+            for (int i = 0; i < blocks.Count; i++)
+            {
+                byte[] b = blocks[i];
+                byte[] db = DecryptAES_ECB(b, key);
+                db = Xor(db, v);
+                Array.Copy(db, 0, result, i * block_size, block_size);
+                v = b;
+            }
+
+            return result;
+        }
 
         static void DetectECB(string filename)
         {
@@ -355,14 +447,7 @@ namespace Cryptopals
             {
                 string hex = lines[k];
                 byte[] msg = DecodeHex(hex);
-                List<byte[]> blocks = new List<byte[]>();
-
-                for (int i = 0; i < msg.Length; i+=block_size)
-                {
-                    byte[] b = new byte[block_size];
-                    Array.Copy(msg, i, b, 0, Math.Min(block_size, msg.Length - i));
-                    blocks.Add(b);
-                }
+                var blocks = BreakIntoBlocksWithPadding(msg, block_size);
 
                 for (int i = 0; i < blocks.Count; i++)
                     for (int j = 0; j < i; j++)
@@ -400,7 +485,13 @@ namespace Cryptopals
 
             //Console.WriteLine(EncodeASCII(DecryptAES_ECB(ReadBytesFromBase64LinesFile("7.txt"), DecodeASCII("YELLOW SUBMARINE"))));
 
-            DetectECB("8.txt");
+            //byte[] msg = EncryptAES_ECB(DecodeASCII("blablabla sdflsjlewrewsflskdjwefsd"), DecodeASCII("YELLOW SUBMARINE"));
+            //string decr = EncodeASCII(DecryptAES_ECB(msg, DecodeASCII("YELLOW SUBMARINE")));
+
+            //DetectECB("8.txt");
+
+            string res = EncodeASCII(DecryptAES_CBC(ReadBytesFromBase64LinesFile("10.txt"), DecodeASCII("YELLOW SUBMARINE"), new byte[16]));
+            Console.WriteLine(res);
             
             Console.ReadLine();
         }
