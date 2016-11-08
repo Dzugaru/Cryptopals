@@ -57,16 +57,41 @@ namespace Cryptopals
                 }
             }
 
-            if(left_bits != 0)            
-                sb.Append(Base64[(left_val << (6 - left_bits))]);            
+            if(left_bits > 0)
+                sb.Append(Base64[(left_val << (6 - left_bits))]);
+
+            int pad = hex.Length % 3;
+            if (pad == 1) sb.Append("=");
+            else if (pad == 2) sb.Append("==");
 
             return sb.ToString();
+        }
+
+        //TODO: do this personally?
+        static string Base64ToHex(string base64)
+        {
+            return EncodeHex(Convert.FromBase64String(base64));
         }
 
         static void TestHexToBase64()
         {
             System.Diagnostics.Debug.Assert(HexToBase64("49276d206b696c6c696e6720796f757220627261696e206c696b65206120706f69736f6e6f7573206d757368726f6f6d") ==
                 "SSdtIGtpbGxpbmcgeW91ciBicmFpbiBsaWtlIGEgcG9pc29ub3VzIG11c2hyb29t");
+
+            System.Diagnostics.Debug.Assert(HexToBase64(EncodeHex(DecodeASCII("any carnal pleasure"))) == "YW55IGNhcm5hbCBwbGVhc3VyZQ==");
+            System.Diagnostics.Debug.Assert(HexToBase64(EncodeHex(DecodeASCII("any carnal pleasure."))) == "YW55IGNhcm5hbCBwbGVhc3VyZS4=");
+
+            System.Diagnostics.Debug.Assert(EncodeASCII(DecodeHex(Base64ToHex("YW55IGNhcm5hbCBwbGVhc3VyZQ=="))) == "any carnal pleasure");
+        }
+
+        static byte[] DecodeASCII(string str)
+        {
+            return System.Text.Encoding.ASCII.GetBytes(str);
+        }
+
+        static string EncodeASCII(byte[] bytes)
+        {
+            return System.Text.Encoding.ASCII.GetString(bytes);
         }
 
         static string EncodeHex(byte[] bytes)
@@ -105,6 +130,14 @@ namespace Cryptopals
             return b;
         }
 
+        static byte[] XorRepeated(byte[] msg, byte[] key)
+        {
+            byte[] coded = new byte[msg.Length];
+            for (int i = 0; i < msg.Length; i++)            
+                coded[i] = (byte)(msg[i] ^ key[i % key.Length]);
+            return coded;            
+        }
+
         static void TestXor()
         {
             System.Diagnostics.Debug.Assert(
@@ -112,6 +145,15 @@ namespace Cryptopals
                     DecodeHex("1c0111001f010100061a024b53535009181c"), 
                     DecodeHex("686974207468652062756c6c277320657965"))) ==
                 "746865206b696420646f6e277420706c6179");
+        }
+
+        static void TestXorRepeated()
+        {
+            System.Diagnostics.Debug.Assert(
+               EncodeHex(XorRepeated(
+                   DecodeASCII("Burning 'em, if you ain't quick and nimble\nI go crazy when I hear a cymbal"),
+                   DecodeASCII("ICE"))) ==
+               "0b3637272a2b2e63622c2e69692a23693a2a3c6324202d623d63343c2a26226324272765272a282b2f20430a652e2c652a3124333a653e2b2027630c692b20283165286326302e27282f");
         }
 
         static void NormalizeFreq(double[] freq)
@@ -154,7 +196,30 @@ namespace Cryptopals
             return err;
         }
 
-        static byte[] DecypherSingleByteXor(byte[] msg, out double best_diff)
+        static int Hamming(byte[] a, byte[] b)
+        {            
+            byte[] c = Xor(a, b);
+            int dist = 0;
+            for (int i = 0; i < c.Length; i++)
+            {
+                byte x = c[i];
+                for (int j = 0; j < 8; j++)
+                {
+                    dist += x & 1;
+                    x >>= 1;
+                }
+            }
+
+            return dist;
+        }
+
+        static void TestHamming()
+        {
+            System.Diagnostics.Debug.Assert(Hamming(DecodeASCII("this is a test"),
+                                                    DecodeASCII("wokka wokka!!!")) == 37);
+        }
+
+        static byte[] DecypherSingleByteXor(byte[] msg, out byte key, out double best_diff)
         {
             double min_freq_diff = double.MaxValue;
             byte best_x = 0;
@@ -173,7 +238,8 @@ namespace Cryptopals
             }
 
             best_diff = min_freq_diff;
-            return XorSingleByte(msg, best_x);
+            key = best_x;
+            return XorSingleByte(msg, key);
         }
 
         static string FindLineCodedBySingleByteXor(string filename)
@@ -185,7 +251,8 @@ namespace Cryptopals
             foreach(string line in lines)
             {
                 double diff;
-                string dec = System.Text.Encoding.ASCII.GetString(DecypherSingleByteXor(DecodeHex(line), out diff));
+                byte key;
+                string dec = System.Text.Encoding.ASCII.GetString(DecypherSingleByteXor(DecodeHex(line), out key, out diff));
                 list.Add((dec, diff));
             }
 
@@ -194,19 +261,96 @@ namespace Cryptopals
             return slist[0].Item1;
         }
 
+        static List<(string key, string message)> BreakRepeatedXor(string filename, int min_key_size, int max_key_size)
+        {
+            const int NBlocksForHamming = 8;
+            const int NTopBest = 5;
+
+            string[] lines = File.ReadAllLines(filename);
+            StringBuilder sb = new StringBuilder();
+            foreach (var line in lines)
+                sb.Append(line.Trim());
+
+            byte[] msg = DecodeHex(Base64ToHex(sb.ToString()));
+
+            List<(double dist, int key_size)> ks_dist = new List<(double dist, int key_size)>();
+
+            for (int key_size = min_key_size; key_size < max_key_size; key_size++)
+            {
+                List<byte[]> blocks = new List<byte[]>();                
+                for (int i = 0; i < NBlocksForHamming; i++)
+                {
+                    byte[] b = new byte[key_size];
+                    Array.Copy(msg, i * key_size, b, 0, key_size);
+                    blocks.Add(b);
+                }
+                double dist = 0;
+                for (int i = 0; i < blocks.Count; i++)                
+                    for (int j = 0; j < i; j++)                    
+                        dist += Hamming(blocks[i], blocks[j]);
+
+                dist /= (double)key_size;
+                
+                ks_dist.Add((dist, key_size));
+            }
+
+            var sort_ks_dist = ks_dist.OrderBy(x => x.dist).Take(NTopBest).ToList();
+            List<(string key, string message)> results = new List<(string key, string message)>();
+            foreach(int key_size in sort_ks_dist.Select(x => x.key_size))
+            {
+                List<byte>[] blocks = new List<byte>[key_size];
+                for (int i = 0; i < key_size; i++)
+                    blocks[i] = new List<byte>();
+                
+                for (int i = 0; i < msg.Length; i+=key_size)
+                {
+                    for (int j = 0; j < key_size && j < msg.Length - i; j++)
+                        blocks[j].Add(msg[i + j]);                    
+                }
+
+                byte[] full_key = new byte[key_size];
+                for (int i = 0; i < key_size; i++)
+                {
+                    double single_byte_diff;
+                    byte key;
+                    DecypherSingleByteXor(blocks[i].ToArray(), out key, out single_byte_diff);
+                    full_key[i] = key;
+                }
+
+                results.Add((EncodeASCII(full_key), EncodeASCII(XorRepeated(msg, full_key))));
+                //Console.WriteLine($"Keysize {key_size}, key: {EncodeASCII(full_key)}, msg: " + new string(EncodeASCII(XorRepeated(msg, full_key)).Take(32).ToArray()));
+                //Console.ReadLine();
+            }
+
+            return results;       
+        }
+
         static void Main(string[] args)
         {
             TestHexToBase64();
             TestXor();
+            TestXorRepeated();
+            TestHamming();
+            Console.WriteLine("Tests success!");
 
             //double diff = GetFreqDifference(EnglishCharFreq, GetStringCharFreq(System.Text.Encoding.ASCII.GetBytes("Cooking MCs like a pound of bacon".ToUpper())));
             //double diff;
-            //string dec = System.Text.Encoding.ASCII.GetString(DecypherSingleByteXor(DecodeHex("1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736"), out diff));
+            //byte key;
+            //string dec = System.Text.Encoding.ASCII.GetString(DecypherSingleByteXor(DecodeHex("1b37373331363f78151b7f2b783431333d78397828372d363c78373e783a393b3736"), out key, out diff));
             //double d = RankDistance(new[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 }, new[] {1, 2, 3, 5, 4 });
 
-            string s = FindLineCodedBySingleByteXor("4.txt");
+            //string s = FindLineCodedBySingleByteXor("4.txt");
 
-            Console.WriteLine("Tests success!");
+            //int d = Hamming(DecodeASCII("this is a test"),
+            //                DecodeASCII("wokka wokka!!!"));
+
+            var results = BreakRepeatedXor("6.txt", 2, 40);
+            Console.WriteLine(results[0].key);
+            Console.WriteLine();
+           
+            Console.WriteLine(results[0].message);
+
+            
             Console.ReadLine();
         }
     }
