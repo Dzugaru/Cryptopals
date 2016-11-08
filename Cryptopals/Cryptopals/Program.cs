@@ -19,6 +19,10 @@ namespace Cryptopals
             6.749, 7.507, 1.929, 0.095, 5.987, 6.327, 9.056, 2.758, 0.978, 2.360, 0.150, 1.974, 0.074, 23.4
         };
 
+        static readonly Random Rng = new Random();
+
+        static readonly byte[] ConstantKeyOracleKey = new byte[16];
+
 
         static Program()
         {
@@ -34,6 +38,8 @@ namespace Cryptopals
             Base64[63] = '/';
 
             NormalizeFreq(EnglishCharFreq);
+
+            Rng.NextBytes(ConstantKeyOracleKey);
         }
 
         //TODO: y I did this??
@@ -234,6 +240,14 @@ namespace Cryptopals
             return result;
         }
 
+        static byte[] Unpad(byte[] msg)
+        {
+            int num_pad = msg[msg.Length - 1];
+            byte[] result = new byte[msg.Length - num_pad];
+            Array.Copy(msg, 0, result, 0, result.Length);
+            return result;
+        }
+
         static List<byte[]> BreakIntoBlocksWithPadding(byte[] msg, int block_size)
         {
             List<byte[]> blocks = new List<byte[]>();
@@ -416,6 +430,26 @@ namespace Cryptopals
             return GatherBlocks(result_blocks, 16);
         }
 
+        static byte[] EncryptAES_CBC(byte[] msg, byte[] key, byte[] iv)
+        {
+            int block_size = key.Length;
+
+            List<byte[]> blocks = BreakIntoBlocksWithPadding(msg, block_size);
+            byte[] result = new byte[blocks.Count * block_size];
+            byte[] v = iv;
+
+            for (int i = 0; i < blocks.Count; i++)
+            {
+                byte[] b = blocks[i];
+                b = Xor(b, v);
+                byte[] eb = EncryptAES_ECB(b, key);                
+                Array.Copy(eb, 0, result, i * block_size, block_size);
+                v = eb;
+            }
+
+            return result;
+        }
+
         static byte[] DecryptAES_CBC(byte[] msg, byte[] key, byte[] iv)
         {
             int block_size = key.Length;
@@ -458,6 +492,123 @@ namespace Cryptopals
             Console.WriteLine(String.Join(", ", suspicios_idx.ToArray()));
         }
 
+        static byte[] Concat(byte[] a, byte[] b)
+        {
+            byte[] c = new byte[a.Length + b.Length];
+            Array.Copy(a, 0, c, 0, a.Length);
+            Array.Copy(b, 0, c, a.Length, b.Length);
+            return c;
+        }
+        
+
+        static byte[] EncryptionOracle(byte[] msg)
+        {
+            byte[] append_before = new byte[Rng.Next(5, 11)];
+            byte[] append_after = new byte[Rng.Next(5, 11)];
+            msg = Concat(Concat(append_before, msg), append_after);            
+
+            byte[] key = new byte[16];
+            Rng.NextBytes(key);
+
+            if (Rng.NextDouble() < 0.5)
+            {
+                Console.WriteLine("Coding with ECB");
+                return EncryptAES_ECB(msg, key);
+            }
+            else
+            {
+                Console.WriteLine("Coding with CBC");
+                byte[] iv = new byte[16];
+                Rng.NextBytes(iv);
+                return EncryptAES_CBC(msg, key, iv);
+            }            
+        }
+
+        static byte[] ConstantKeyOracle(byte[] injected)
+        {
+            byte[] unknown = DecodeHex(Base64ToHex("Um9sbGluJyBpbiBteSA1LjAKV2l0aCBteSByYWctdG9wIGRvd24gc28gbXkgaGFpciBjYW4gYmxvdwpUaGUgZ2lybGllcyBvbiBzdGFuZGJ5IHdhdmluZyBqdXN0IHRvIHNheSBoaQpEaWQgeW91IHN0b3A/IE5vLCBJIGp1c3QgZHJvdmUgYnkK"));
+
+            string spoiler = EncodeASCII(unknown);
+
+            byte[] msg = Concat(injected, unknown);
+            return EncryptAES_ECB(msg, ConstantKeyOracleKey);
+        }
+
+        static void IsECBOrCBC(Func<byte[], byte[]> oracle)
+        {
+            const int block_size = 16;
+            string input = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+            for (int k = 0; k < 8; k++)
+            {
+                Console.WriteLine($"Testing iter {k}");
+                byte[] coded = oracle(DecodeASCII(input));
+                var blocks = BreakIntoBlocksWithPadding(coded, block_size);
+
+                for (int i = 0; i < blocks.Count; i++)
+                    for (int j = 0; j < i; j++)
+                        if (Hamming(blocks[i], blocks[j]) == 0)
+                        {
+                            Console.WriteLine("ECB detected!");
+                            goto Exit;
+                        }
+
+
+                Exit: { }                
+            }            
+        }
+
+        static string BreakConstantKeyOracle(Func<byte[], byte[]> oracle)
+        {
+            //Discover block size and if it is using ECB
+            StringBuilder inj = new StringBuilder();            
+
+            int block_size;
+            for(block_size = 1; ; block_size++)
+            {
+                inj.Append("AA");
+                byte[] crypt = oracle(DecodeASCII(inj.ToString()));
+                List<byte[]> cbs = BreakIntoBlocksWithPadding(crypt, block_size);
+                if(Hamming(cbs[0], cbs[1]) == 0)                                    
+                    break;                                
+            }
+
+            //Break one byte at a time
+            StringBuilder unknown = new StringBuilder();
+            for (int i = 0; ; i++)
+            {
+                inj.Clear();
+                for (int j = 0; j < block_size - 1 - (i % block_size); j++)
+                    inj.Append("A");
+                string sinj = inj.ToString();
+                string sunknown = unknown.ToString();
+                                
+                List<byte[]> ucrypt_blocks = BreakIntoBlocksWithPadding(oracle(DecodeASCII(sinj)), block_size);
+
+                int k = i / block_size;
+                if (k >= ucrypt_blocks.Count) break;
+                byte[] ucrypt = ucrypt_blocks[k];
+
+                string t;
+                if (k == 0) t = sinj + sunknown;
+                else t = sunknown.Substring(sunknown.Length - block_size + 1);
+
+                int x;   
+                for (x = 0; x < 255; x++)
+                {
+                    byte[] crypt = oracle(DecodeASCII(t + (char)x)).Take(block_size).ToArray();
+                    if (Hamming(ucrypt, crypt) == 0)
+                    {
+                        unknown.Append((char)x);
+                        break;
+                    }
+                }
+                if (x == 255) unknown.ToString();
+            }              
+
+            return unknown.ToString();
+        }
+
         static void Main(string[] args)
         {
             TestHexToBase64();
@@ -490,8 +641,18 @@ namespace Cryptopals
 
             //DetectECB("8.txt");
 
-            string res = EncodeASCII(DecryptAES_CBC(ReadBytesFromBase64LinesFile("10.txt"), DecodeASCII("YELLOW SUBMARINE"), new byte[16]));
-            Console.WriteLine(res);
+            //byte[] iv = new byte[16];
+            //Rng.NextBytes(iv);
+            //string test = EncodeASCII(Unpad(DecryptAES_CBC(EncryptAES_CBC(DecodeASCII("aaaaabbbbbbcccccccddddd  dsflkjwlekjsdlfnsdl lwj lsjdlf sjdlsjflwjelnfs lsdjf lskd lsnfl"), 
+            //    DecodeASCII("YELLOW SUBMARINE"), iv),
+            //    DecodeASCII("YELLOW SUBMARINE"), iv)));
+            //string res = EncodeASCII(DecryptAES_CBC(ReadBytesFromBase64LinesFile("10.txt"), DecodeASCII("YELLOW SUBMARINE"), new byte[16]));
+            //Console.WriteLine(res);
+
+            //byte[] result = EncryptionOracle(DecodeASCII("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+            //IsECBOrCBC(EncryptionOracle);
+            string decrypted = BreakConstantKeyOracle(ConstantKeyOracle);
+            Console.WriteLine(decrypted);
             
             Console.ReadLine();
         }
