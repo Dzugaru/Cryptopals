@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Security.Cryptography;
 
 namespace Cryptopals
 {
@@ -32,9 +33,10 @@ namespace Cryptopals
             Base64[62] = '+';
             Base64[63] = '/';
 
-            NormalizeFreq(EnglishCharFreq);   
+            NormalizeFreq(EnglishCharFreq);         
         }
 
+        //TODO: y I did this??
         static string HexToBase64(string hex)
         {
             StringBuilder sb = new StringBuilder();
@@ -261,17 +263,23 @@ namespace Cryptopals
             return slist[0].Item1;
         }
 
+        static byte[] ReadBytesFromBase64LinesFile(string filename)
+        {
+            string[] lines = File.ReadAllLines(filename);
+            StringBuilder sb = new StringBuilder();
+            foreach (var line in lines)
+                sb.Append(line.Trim());
+            byte[] msg = DecodeHex(Base64ToHex(sb.ToString()));
+
+            return msg;
+        }
+
         static List<(string key, string message)> BreakRepeatedXor(string filename, int min_key_size, int max_key_size)
         {
             const int NBlocksForHamming = 8;
             const int NTopBest = 5;
 
-            string[] lines = File.ReadAllLines(filename);
-            StringBuilder sb = new StringBuilder();
-            foreach (var line in lines)
-                sb.Append(line.Trim());
-
-            byte[] msg = DecodeHex(Base64ToHex(sb.ToString()));
+            byte[] msg = ReadBytesFromBase64LinesFile(filename);
 
             List<(double dist, int key_size)> ks_dist = new List<(double dist, int key_size)>();
 
@@ -325,6 +333,46 @@ namespace Cryptopals
             return results;       
         }
 
+        static byte[] DecryptAES_ECB(byte[] msg, byte[] key)
+        {
+            var aes = Aes.Create();
+            aes.Mode = CipherMode.ECB;
+            aes.BlockSize = 128;
+            aes.Key = key;
+
+            var decr = aes.CreateDecryptor();
+            return decr.TransformFinalBlock(msg, 0, msg.Length);
+        }        
+
+        static void DetectECB(string filename)
+        {
+            const int block_size = 16;
+
+            HashSet<int> suspicios_idx = new HashSet<int>();
+
+            string[] lines = File.ReadAllLines(filename);
+            for (int k = 0; k < lines.Length; k++)
+            {
+                string hex = lines[k];
+                byte[] msg = DecodeHex(hex);
+                List<byte[]> blocks = new List<byte[]>();
+
+                for (int i = 0; i < msg.Length; i+=block_size)
+                {
+                    byte[] b = new byte[block_size];
+                    Array.Copy(msg, i, b, 0, Math.Min(block_size, msg.Length - i));
+                    blocks.Add(b);
+                }
+
+                for (int i = 0; i < blocks.Count; i++)
+                    for (int j = 0; j < i; j++)
+                        if(Hamming(blocks[i], blocks[j]) == 0)                        
+                            suspicios_idx.Add(k);                        
+            }
+
+            Console.WriteLine(String.Join(", ", suspicios_idx.ToArray()));
+        }
+
         static void Main(string[] args)
         {
             TestHexToBase64();
@@ -344,12 +392,15 @@ namespace Cryptopals
             //int d = Hamming(DecodeASCII("this is a test"),
             //                DecodeASCII("wokka wokka!!!"));
 
-            var results = BreakRepeatedXor("6.txt", 2, 40);
-            Console.WriteLine(results[0].key);
-            Console.WriteLine();
-           
-            Console.WriteLine(results[0].message);
+            //var results = BreakRepeatedXor("6.txt", 2, 40);
+            //Console.WriteLine(results[0].key);
+            //Console.WriteLine();
 
+            //Console.WriteLine(results[0].message);
+
+            //Console.WriteLine(EncodeASCII(DecryptAES_ECB(ReadBytesFromBase64LinesFile("7.txt"), DecodeASCII("YELLOW SUBMARINE"))));
+
+            DetectECB("8.txt");
             
             Console.ReadLine();
         }
